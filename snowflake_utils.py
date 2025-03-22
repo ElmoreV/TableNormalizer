@@ -94,6 +94,78 @@ def get_pairwise_unique_values(cursor, full_table_name, column_name_1, column_na
     unique_values = cursor.fetchone()[0]
     return unique_values
 
+def get_general_unique_values(cursor, full_table_name, lhs_columns, rhs_columns, filters=None, count_null_as_distinct_value=True):
+    if rhs_columns is None or len(rhs_columns) == 0:
+        return None
+    if lhs_columns == None:
+        lhs_columns = []
+    # Set up all output columns
+    select_clause = ""
+    groupers = ""
+    for rhs_column in rhs_columns:
+        if count_null_as_distinct_value:
+            select_clause += f"COUNT(DISTINCT COALESCE({rhs_column}::VARCHAR, 'NULL_PLACEHOLDER')) as {rhs_column}, \n"
+        else:
+            select_clause += f"COUNT(DISTINCT {rhs_column}) as {rhs_column}, \n"
+            
+    # Add filter if provided
+    filter_clause = ""
+    if filters:
+        filter_clause += f"""
+            WHERE {filters}
+        """
+    
+    # Group by all columns (not there is lhs is empty)
+    group_clause = ""
+    for ii, lhs_column in enumerate(lhs_columns):
+        if count_null_as_distinct_value:
+            groupers += f"COALESCE({lhs_column}::VARCHAR, 'NULL_PLACEHOLDER')"
+        else:
+            groupers += f"{lhs_column}"
+        if ii < len(lhs_columns) - 1:
+            groupers += ",\n"
+        else:
+            groupers += "\n"
+    if len(lhs_columns) > 0:
+        group_clause = f"""
+            GROUP BY
+                {groupers}
+        """
+
+    # Select clause to maximize all counts of unique RHS colimssn
+    count_maximizers = ""
+    for column in rhs_columns:
+        count_maximizers += f"MAX({column}) as {column}, \n"
+    
+    # Build final query
+    unique_value_query = f"""
+    WITH grouped_counts AS (
+        SELECT
+        {select_clause}
+        FROM
+            {full_table_name}
+        {filter_clause}
+        {group_clause}
+    )
+    SELECT
+        {count_maximizers}
+    FROM
+        grouped_counts
+    """
+    # print(f"DEBUG: Running unique value query -> {unique_value_query}")
+    # Retrieve and format results
+    cursor.execute(unique_value_query)
+    unique_values = cursor.fetchone()
+    results = {}
+    for ii, column in enumerate(rhs_columns):
+        results[column] = unique_values[ii]
+    return results
+        
+            
+    
+
+
+
 def get_triplet_unique_values(cursor, full_table_name, column_name_1, column_name_2, column_name_3, filters=None, count_null_as_distinct_value=True):
     if count_null_as_distinct_value:
         unique_value_query = f"""
